@@ -1,11 +1,11 @@
-# Vendor Listing Pipeline
+# Vendor Catalogue Review Desk
 
 Raw vendor CSV row → **parallel extraction** (color, fabric, demographic router) → **fan-in** → **Hinglish description & fit generator** → `ApprovedListingObject`, served through **FastAPI**.
 
 ## Project structure
 
 ```
-vendor-listing-pipeline/
+vendor-catalogue-review-desk/
 ├── .vscode/                    settings.json · launch.json (debug API/tests) · tasks.json
 ├── frontend/                   Review desk UI (index.html, styles.css, app.js)
 ├── app/
