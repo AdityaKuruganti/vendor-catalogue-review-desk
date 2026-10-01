@@ -5,6 +5,7 @@ pydantic>=2.7
 pydantic-settings>=2.3
 langchain-core>=0.3
 langchain-openai>=0.2
+supabase>=2.10
 
 # dev / test
 pytest>=8.0

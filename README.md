@@ -12,7 +12,7 @@ vendor-catalogue-review-desk/
 │   ├── main.py                 FastAPI app + error handler
 │   ├── config.py               Settings loaded from .env
 │   ├── llm.py                  Lazy ChatOpenAI (OpenRouter) factory
-│   ├── db.py                   SQLite store for requests, listings and review status
+│   ├── db.py                   Supabase (Postgres) store for requests, listings and review status
 │   ├── schemas.py              All Pydantic models (input, stage output, final object, API responses)
 │   ├── api/routes.py           Stateless endpoints
 │   ├── api/review.py           Requests, edits, approvals, services
@@ -24,6 +24,7 @@ vendor-catalogue-review-desk/
 │       ├── router.py           Stage 3 Demographic router (WOMEN / KIDS / MEN branches)
 │       ├── generator.py        Stage 4 Hinglish description & fit generator
 │       └── pipeline.py         RunnableParallel fan-out → fan-in → generator → approved object
+├── supabase/schema.sql         Tables, summary view and RLS (run once in Supabase)
 ├── data/sample_vendor_rows.csv Sample vendor data (10 rows)
 ├── tests/                      pytest suite using a fake LLM (no API key / network needed)
 ├── .env.example
@@ -40,7 +41,7 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env               # Windows: copy .env.example .env
-# edit .env and set OPENROUTER_API_KEY
+# edit .env: set OPENROUTER_API_KEY, SUPABASE_URL and SUPABASE_SERVICE_KEY
 ```
 
 In VS Code: `Ctrl+Shift+P` → **Python: Select Interpreter** → pick `.venv`.
@@ -52,11 +53,27 @@ uvicorn app.main:app --reload --port 8000
 
 Interactive docs: http://localhost:8000/docs
 
+## Supabase setup (database)
+
+Review data (requests, listings, edits, approvals) is stored in **Supabase Postgres**.
+
+1. Create a project at [supabase.com](https://supabase.com).
+2. Open **SQL Editor**, paste the contents of `supabase/schema.sql` and run it. This creates the `requests` and `listings` tables, enables Row Level Security and reloads the API schema cache.
+3. Open **Project settings → API** and copy the project URL and the **service_role** (secret) key into `.env`:
+   ```
+   SUPABASE_URL=https://<project-ref>.supabase.co
+   SUPABASE_SERVICE_KEY=<service role key>
+   ```
+
+The service-role key bypasses RLS and must stay on the server: never put it in `frontend/` or commit `.env`. Because RLS is on with no policies, the public anon key cannot read or write this data.
+
+If Supabase isn't configured (or the schema hasn't been applied), review endpoints return `503` with a message. The stateless `/listings/*` endpoints still work.
+
 ## Review desk (frontend)
 
 Open http://localhost:8000/ after starting the API. No build step; the UI lives in `frontend/` and is served by FastAPI.
 
-- **Requests**: upload a vendor CSV (or use the sample). Listings are generated and saved to SQLite (`data/listings.db`).
+- **Requests**: upload a vendor CSV (or use the sample). Listings are generated and saved to Supabase (Postgres).
 - **Review**: the vendor's original text sits beside the generated listing. The representative can edit any field, then approve, reject or reopen it, with an optional note. Editing a listing returns it to *Needs review*. Nothing is approved automatically.
 - **Services**: LLM key and model status, the workflow stages, and a box to try one row.
 - Each listing has an English description, a Hinglish description and fit guidance.
@@ -92,6 +109,8 @@ Batch responses report `succeeded` / `failed` counts, and one failing row never 
 ```bash
 pytest -v
 ```
+
+Tests use an in-memory Supabase fake, so no project or network is needed.
 
 ## Changes vs. the original `miniProject` script
 

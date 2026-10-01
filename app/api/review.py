@@ -1,4 +1,5 @@
 """Endpoints behind the review desk UI: services catalogue, requests, edits, approvals."""
+import asyncio
 import csv
 import io
 
@@ -24,14 +25,16 @@ STAGES = [
 
 async def _run(name: str, rows: list[VendorRow], workflow: Runnable, s: Settings) -> dict:
     batch = await process_rows(workflow, rows, s.batch_max_concurrency)
-    return db.get_request(db.create_request(name, rows, batch))
+    # Supabase calls are blocking; keep them off the event loop.
+    rid = await asyncio.to_thread(db.create_request, name, rows, batch)
+    return await asyncio.to_thread(db.get_request, rid)
 
 
 @router.get("/services")
 def services(s: Settings = Depends(get_settings)):
     return {
         "health": {"status": "ok", "model": s.llm_model, "api_key_configured": bool(s.openrouter_api_key),
-                   "database": s.database_path, "concurrency": s.batch_max_concurrency},
+                   "database": f"Supabase ({db.host_label()})", "concurrency": s.batch_max_concurrency},
         "stages": [{"name": n, "what": w, "mode": m} for n, w, m in STAGES],
     }
 
