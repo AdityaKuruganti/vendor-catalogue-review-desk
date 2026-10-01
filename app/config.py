@@ -16,7 +16,10 @@ class Settings(BaseSettings):
     batch_max_concurrency: int = 5
     max_upload_rows: int = 200
     sample_csv_path: str = "data/sample_vendor_rows.csv"
-    database_path: str = "data/listings.db"
+
+    # Supabase (Postgres). Use the service-role key; it stays on the server.
+    supabase_url: str = ""
+    supabase_service_key: str = ""
 
 
 @lru_cache
