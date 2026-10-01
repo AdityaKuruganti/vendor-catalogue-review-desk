@@ -28,13 +28,25 @@ from app.config import get_settings  # noqa: E402
 from app.schemas import ApprovedListingObject  # noqa: E402
 from app.services.csv_loader import CsvValidationError, load_csv_file, parse_csv_bytes  # noqa: E402
 from app.services.processor import process_rows  # noqa: E402
-from app.workflow.pipeline import get_workflow  # noqa: E402
+from app.llm import get_llm  # noqa: E402
+from app.workflow.pipeline import build_workflow  # noqa: E402
 
 DEMOGRAPHICS = ["MEN", "WOMEN", "KIDS"]
 BADGE = {"pending": "🟡 Needs review", "approved": "🟢 Approved", "rejected": "🔴 Rejected", "error": "⚠️ Error"}
 
 st.set_page_config(page_title="Vendor Catalogue Review Desk", page_icon="🧵", layout="wide")
 s = get_settings()
+
+
+def fresh_workflow():
+    """New LLM client + workflow for every run.
+
+    The cached get_workflow()/get_llm() keep an async HTTP client bound to the first event loop.
+    Streamlit runs each action in a new asyncio.run() loop and closes it afterwards, so reusing
+    that client raises "RuntimeError: Event loop is closed". __wrapped__ bypasses the lru_cache
+    (it still validates the API key and reads the same settings).
+    """
+    return build_workflow(get_llm.__wrapped__())
 
 
 def guarded(action):
@@ -49,7 +61,7 @@ def guarded(action):
 
 def generate(name: str, rows):
     with st.spinner(f"Generating {len(rows)} listings…"):
-        batch = asyncio.run(process_rows(get_workflow(), rows, s.batch_max_concurrency))
+        batch = asyncio.run(process_rows(fresh_workflow(), rows, s.batch_max_concurrency))
         rid = db.create_request(name, rows, batch)
     st.session_state["open_rid"] = rid
     st.toast(f"{batch.succeeded} of {batch.total} listings generated")
@@ -93,7 +105,7 @@ if page == "Services":
     if st.button("Generate listing", type="primary"):
         def _try():
             with st.spinner("Running workflow…"):
-                out = asyncio.run(get_workflow().ainvoke({"raw_row": raw}))
+                out = asyncio.run(fresh_workflow().ainvoke({"raw_row": raw}))
             st.json(out.model_dump())
         guarded(_try)
     st.stop()
