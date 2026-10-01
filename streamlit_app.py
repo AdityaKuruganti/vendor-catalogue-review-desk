@@ -23,6 +23,7 @@ except Exception:
 os.chdir(Path(__file__).resolve().parent)  # so data/sample_vendor_rows.csv resolves anywhere
 
 from app import db  # noqa: E402
+from app.api.review import STAGES  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.schemas import ApprovedListingObject  # noqa: E402
 from app.services.csv_loader import CsvValidationError, load_csv_file, parse_csv_bytes  # noqa: E402
@@ -65,7 +66,80 @@ def approved_csv(req: dict) -> str:
     return buf.getvalue()
 
 
-# ---------------------------------------------------------------- sidebar
+# ---------------------------------------------------------------- navigation
+st.sidebar.title("Vendor Catalogue Review Desk")
+page = st.sidebar.radio("Go to", ["Requests", "Services", "Docs"], key="page", label_visibility="collapsed")
+st.sidebar.divider()
+
+# ---------------------------------------------------------------- services page
+if page == "Services":
+    st.title("Services")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Model", s.llm_model)
+    m2.metric("LLM API key", "configured" if s.openrouter_api_key else "missing")
+    m3.metric("Database", f"Supabase ({db.host_label()})")
+    m4.metric("Concurrency", s.batch_max_concurrency)
+
+    st.subheader("Workflow stages")
+    for i, (name, what, mode) in enumerate(STAGES, 1):
+        st.markdown(f"**{i}. {name}** — {what} · _{mode}_")
+
+    st.subheader("Try one vendor row")
+    raw = st.text_area(
+        "Raw vendor text",
+        "Gents navy blue formal shirt made of pure linen fabric. Size XL available.",
+        height=100,
+    )
+    if st.button("Generate listing", type="primary"):
+        def _try():
+            with st.spinner("Running workflow…"):
+                out = asyncio.run(get_workflow().ainvoke({"raw_row": raw}))
+            st.json(out.model_dump())
+        guarded(_try)
+    st.stop()
+
+# ---------------------------------------------------------------- docs page
+if page == "Docs":
+    st.title("Docs")
+    st.markdown(
+        """
+**What this app does.** A raw vendor CSV row goes through parallel extraction (color, fabric,
+demographic router) → fan-in → Hinglish description and fit generator → an approved listing
+object, saved to Supabase for human review. Nothing is approved automatically.
+
+### CSV format
+| Column | Required | Notes |
+|---|---|---|
+| `raw_row` | yes | The vendor's messy product text |
+| `sku` | no | Shown in the review list and in the export |
+| `vendor` | no | Included in the export |
+
+UTF-8 only. Blank rows are skipped. The row limit is set by `MAX_UPLOAD_ROWS`.
+
+### Review workflow
+1. **Requests → upload a CSV** (or use the sample). Listings are generated and saved.
+2. Open a request and compare the vendor text with the generated listing.
+3. Edit any field and click **Save edits**. An edited listing returns to *Needs review*.
+4. **Approve**, **Reject** or **Reopen**, with an optional note.
+5. **Download approved CSV** for the approved rows.
+
+### Settings (secrets / environment variables)
+`OPENROUTER_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` (secret key), `LLM_MODEL`,
+`LLM_BASE_URL`, `LLM_TEMPERATURE`, `BATCH_MAX_CONCURRENCY`, `MAX_UPLOAD_ROWS`, `SAMPLE_CSV_PATH`.
+        """
+    )
+    st.subheader("Listing fields")
+    st.table(
+        [{"field": n, "description": f.description or ""} for n, f in ApprovedListingObject.model_fields.items()]
+    )
+    st.info(
+        "The interactive Swagger page (`/docs`) and REST endpoints belong to the FastAPI app, which this "
+        "Streamlit deployment does not run. To get them, run `uvicorn app.main:app` (see the README); "
+        "its endpoints are listed in the README."
+    )
+    st.stop()
+
+# ---------------------------------------------------------------- requests sidebar
 with st.sidebar:
     st.header("Requests")
     up = st.file_uploader("Vendor CSV (needs a raw_row column)", type="csv")
@@ -87,13 +161,8 @@ with st.sidebar:
         format_func=lambda i: f"#{i} · {by_id[i]['filename']} ({by_id[i]['pending']} pending)",
     ) if by_id else None
 
-    with st.expander("Services"):
-        st.write(f"Model: `{s.llm_model}`")
-        st.write(f"LLM key configured: {'yes' if s.openrouter_api_key else 'no'}")
-        st.write(f"Database: Supabase (`{db.host_label()}`)")
-
 # ---------------------------------------------------------------- main
-st.title("Vendor Catalogue Review Desk")
+st.title("Requests")
 if rid is None:
     st.info("Upload a vendor CSV or use the sample to get started.")
     st.stop()

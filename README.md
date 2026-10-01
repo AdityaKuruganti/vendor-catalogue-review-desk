@@ -123,7 +123,7 @@ Tests use an in-memory Supabase fake, so no project or network is needed.
 
 ## Deploy with Streamlit
 
-`streamlit_app.py` is a Streamlit version of the review desk. It calls the same workflow, CSV loader and Supabase store directly, so FastAPI is not needed for it. (The FastAPI app and `frontend/` still work as before.)
+`streamlit_app.py` is a Streamlit version of the review desk with three pages: **Requests**, **Services** (model/key/database status, workflow stages, try one row) and **Docs** (usage guide; the Swagger `/docs` page exists only in the FastAPI app). It calls the same workflow, CSV loader and Supabase store directly, so FastAPI is not needed for it. (The FastAPI app and `frontend/` still work as before.)
 
 Run locally:
 
