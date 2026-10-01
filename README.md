@@ -120,3 +120,22 @@ Tests use an in-memory Supabase fake, so no project or network is needed.
 - Regex word-boundary routing, so "men" is never confused with "women".
 - Final object now includes `size`. Title, color, fabric and demographic come from the extractors; the Stage 4 LLM only writes `hinglish_description` and `fit_guidance`, so it can't silently rewrite them.
 - Batch runs use `abatch` with `max_concurrency` (`BATCH_MAX_CONCURRENCY`) to respect API rate limits.
+
+## Deploy with Streamlit
+
+`streamlit_app.py` is a Streamlit version of the review desk. It calls the same workflow, CSV loader and Supabase store directly, so FastAPI is not needed for it. (The FastAPI app and `frontend/` still work as before.)
+
+Run locally:
+
+```bash
+pip install -r requirements.txt
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml   # fill in; or keep using .env
+streamlit run streamlit_app.py
+```
+
+Deploy on Streamlit Community Cloud:
+
+1. Push the repo to GitHub. **Do not commit `.env` or `.streamlit/secrets.toml`** (both are gitignored).
+2. At share.streamlit.io choose **New app**, pick the repo/branch and set **Main file path** to `streamlit_app.py`.
+3. In **Advanced settings** choose Python 3.11 or 3.12 and paste the contents of `.streamlit/secrets.toml.example` (with real values) into **Secrets**.
+4. `SUPABASE_SERVICE_KEY` must be the **secret** key (`sb_secret_...`), not the publishable key. Run `supabase/schema.sql` in the Supabase SQL Editor first.

@@ -11,6 +11,14 @@
       "jinja": true
     },
     {
+      "name": "Streamlit: review desk (debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "streamlit",
+      "args": ["run", "streamlit_app.py"],
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
       "name": "Pytest: all tests",
       "type": "debugpy",
       "request": "launch",
