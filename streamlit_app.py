@@ -7,6 +7,7 @@ import asyncio
 import csv
 import io
 import os
+import threading
 from pathlib import Path
 
 import streamlit as st
@@ -28,8 +29,7 @@ from app.config import get_settings  # noqa: E402
 from app.schemas import ApprovedListingObject  # noqa: E402
 from app.services.csv_loader import CsvValidationError, load_csv_file, parse_csv_bytes  # noqa: E402
 from app.services.processor import process_rows  # noqa: E402
-from app.llm import get_llm  # noqa: E402
-from app.workflow.pipeline import build_workflow  # noqa: E402
+from app.workflow.pipeline import get_workflow  # noqa: E402
 
 DEMOGRAPHICS = ["MEN", "WOMEN", "KIDS"]
 BADGE = {"pending": "🟡 Needs review", "approved": "🟢 Approved", "rejected": "🔴 Rejected", "error": "⚠️ Error"}
@@ -38,15 +38,23 @@ st.set_page_config(page_title="Vendor Catalogue Review Desk", page_icon="🧵", 
 s = get_settings()
 
 
-def fresh_workflow():
-    """New LLM client + workflow for every run.
+@st.cache_resource
+def _event_loop() -> asyncio.AbstractEventLoop:
+    """One long-lived event loop for the whole Streamlit process, running in a background thread.
 
-    The cached get_workflow()/get_llm() keep an async HTTP client bound to the first event loop.
-    Streamlit runs each action in a new asyncio.run() loop and closes it afterwards, so reusing
-    that client raises "RuntimeError: Event loop is closed". __wrapped__ bypasses the lru_cache
-    (it still validates the API key and reads the same settings).
+    langchain-openai shares a single async HTTP client that binds to the first event loop it
+    runs on. Calling asyncio.run() per action creates and then closes a new loop each time, so
+    later calls (e.g. the 2nd row/request) fail with "RuntimeError: Event loop is closed".
+    Running every async call on this one loop keeps that client valid.
     """
-    return build_workflow(get_llm.__wrapped__())
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True, name="async-loop").start()
+    return loop
+
+
+def run_async(coro):
+    """Run a coroutine on the shared loop and wait for its result (safe across reruns/sessions)."""
+    return asyncio.run_coroutine_threadsafe(coro, _event_loop()).result()
 
 
 def guarded(action):
@@ -61,7 +69,7 @@ def guarded(action):
 
 def generate(name: str, rows):
     with st.spinner(f"Generating {len(rows)} listings…"):
-        batch = asyncio.run(process_rows(fresh_workflow(), rows, s.batch_max_concurrency))
+        batch = run_async(process_rows(get_workflow(), rows, s.batch_max_concurrency))
         rid = db.create_request(name, rows, batch)
     st.session_state["open_rid"] = rid
     st.toast(f"{batch.succeeded} of {batch.total} listings generated")
@@ -105,7 +113,7 @@ if page == "Services":
     if st.button("Generate listing", type="primary"):
         def _try():
             with st.spinner("Running workflow…"):
-                out = asyncio.run(fresh_workflow().ainvoke({"raw_row": raw}))
+                out = run_async(get_workflow().ainvoke({"raw_row": raw}))
             st.json(out.model_dump())
         guarded(_try)
     st.stop()
