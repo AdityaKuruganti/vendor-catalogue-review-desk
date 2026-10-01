@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run API",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/uvicorn app.main:app --reload --port 8000",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run tests",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/pytest -v",
+      "problemMatcher": []
+    }
+  ]
+}
