@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     llm_model: str = "openai/gpt-4o-mini"
     llm_temperature: float = 0.0
 
+    # CX copilot: optional per-step models (cheap classifier, stronger drafter/judge).
+    # Empty means "use LLM_MODEL".
+    cx_classifier_model: str = ""
+    cx_draft_model: str = ""
+    cx_eval_model: str = ""
+
     batch_max_concurrency: int = 5
     max_upload_rows: int = 200
     sample_csv_path: str = "data/sample_vendor_rows.csv"

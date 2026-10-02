@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from postgrest.exceptions import APIError
 
+from app.api.cx import router as cx_router
 from app.api.review import router as review_router
 from app.api.routes import router
 from app.db import SupabaseConfigError
@@ -17,6 +18,7 @@ app = FastAPI(
 )
 app.include_router(router)
 app.include_router(review_router)
+app.include_router(cx_router)
 
 
 @app.exception_handler(MissingApiKeyError)

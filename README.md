@@ -139,3 +139,54 @@ Deploy on Streamlit Community Cloud:
 2. At share.streamlit.io choose **New app**, pick the repo/branch and set **Main file path** to `streamlit_app.py`.
 3. In **Advanced settings** choose Python 3.11 or 3.12 and paste the contents of `.streamlit/secrets.toml.example` (with real values) into **Secrets**.
 4. `SUPABASE_SERVICE_KEY` must be the **secret** key (`sb_secret_...`), not the publishable key. Run `supabase/schema.sql` in the Supabase SQL Editor first.
+
+## Step 3: CX Support Copilot
+
+Customer phone + message -> draft Hinglish reply for a support agent. It looks up the
+customer's orders and joins each order to the **approved** listing in `listings`
+(`orders.sku_code = listings.sku`), so fit and size answers come from reviewed catalogue
+data, not from the model's memory. Nothing is sent automatically; the agent edits and approves.
+
+```
+phone ──► find customer (Supabase, deterministic)
+message ─► classify (structured Intent) ─► guards: escalate returns / low confidence / unknown number,
+                                             drop order ids that are not this customer's
+        ─► orders ⨝ approved listings ─► facts block
+        ─► RunnableBranch: ORDER_STATUS | FIT_SIZE | ORDER_AND_FIT prompt ─► DraftReply
+        ─► verify: digit-token grounding check + LLM judge ─► 1 rewrite max ─► needs_human if still failing
+```
+
+It is a fixed chain, not an agent: the steps are known, data lookups must be scoped to one
+customer, and cost and latency stay predictable.
+
+**Code:** `app/cx/` (`guards.py` pure rules, `store.py` Supabase access, `chains.py` LCEL,
+`pipeline.py` orchestration, `schemas.py`), `app/api/cx.py` (`POST /cx/draft`, `POST /cx/approve`),
+a **Support** page in `streamlit_app.py`, SQL in `supabase/schema_cx.sql` and `supabase/seed_cx.sql`.
+Existing files touched: `app/config.py`, `app/llm.py`, `app/main.py`, `streamlit_app.py`,
+`.env.example`, `.streamlit/secrets.toml.example` (see `step3.patch`).
+
+**Setup**
+
+1. Run `supabase/schema.sql` (already done), then `supabase/schema_cx.sql` in the SQL Editor.
+2. Optional demo data: run `supabase/seed_cx.sql`. Then process `data/sample_vendor_rows.csv` in the
+   review desk and **approve** the rows. Until a listing is approved, the copilot says the catalogue
+   is not available and routes fit questions to a human (this is intended).
+3. Optional models per step in `.env`: `CX_CLASSIFIER_MODEL` (cheap), `CX_DRAFT_MODEL`,
+   `CX_EVAL_MODEL`. Empty means `LLM_MODEL`.
+4. `streamlit run streamlit_app.py` -> **Support**, or `uvicorn app.main:app` -> `/docs` -> `/cx/*`.
+
+**Things to know**
+
+- `fit_guidance` is the only fit data available. The Stage 4 generator writes it from just title,
+  colour, fabric and size, so it can contain claims nobody verified ("true to size"). Reviewers should
+  check it when approving. A better long-term fix is structured fit fields (measurements, stretch, care,
+  shrinkage) in `ListingCopy`, which the copilot could then quote exactly.
+- The join needs the order system's SKU codes to equal the `sku` column in vendor CSVs (it is optional
+  there). Listings without a SKU can never be matched.
+- The grounding check flags any date, tracking number, size or amount in the reply that is not in the
+  facts or the customer's message. It is deliberately strict; false alarms just mean a human reads it.
+- `cx_*` tables hold personal data: RLS is on, anon access revoked, server uses the service-role key.
+  The reply log stores a masked phone, but draft and final text can contain names.
+- Sending through Freshdesk is not implemented. "Approve & log" only records the final text.
+
+**Tests:** `pytest -v tests/test_cx_*.py` (guards, store, pipeline with a scripted fake LLM, API).

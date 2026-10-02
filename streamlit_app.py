@@ -26,6 +26,8 @@ os.chdir(Path(__file__).resolve().parent)  # so data/sample_vendor_rows.csv reso
 from app import db  # noqa: E402
 from app.api.review import STAGES  # noqa: E402
 from app.config import get_settings  # noqa: E402
+from app.cx import store as cx_store  # noqa: E402
+from app.cx.pipeline import get_cx_chains, run_copilot  # noqa: E402
 from app.schemas import ApprovedListingObject  # noqa: E402
 from app.services.csv_loader import CsvValidationError, load_csv_file, parse_csv_bytes  # noqa: E402
 from app.services.processor import process_rows  # noqa: E402
@@ -88,8 +90,60 @@ def approved_csv(req: dict) -> str:
 
 # ---------------------------------------------------------------- navigation
 st.sidebar.title("Vendor Catalogue Review Desk")
-page = st.sidebar.radio("Go to", ["Requests", "Services", "Docs"], key="page", label_visibility="collapsed")
+page = st.sidebar.radio("Go to", ["Requests", "Support", "Services", "Docs"], key="page", label_visibility="collapsed")
 st.sidebar.divider()
+
+# ---------------------------------------------------------------- support (CX copilot) page
+CX_SAMPLES = {
+    "Where is my kurta? (Priya)": ("+91 98765 43210", "Mera green kurta kab aayega? ORD-10001"),
+    "Order + fit (Priya)": ("9876543210", "ORD-10001 kahan hai? Aur size M loose to nahi hoga?"),
+    "Fit on a saree (Priya)": ("9876543210", "ORD-10005 wali saree mein blouse piece hai kya?"),
+    "Several orders, no id (Anita)": ("9123456780", "Mera order kab tak aayega?"),
+    "SKU not in catalogue (Anita)": ("9123456780", "ORD-10006 ka fabric kya hai?"),
+    "Return request (Anita)": ("9123456780", "Frock ka size chhota hai, return karna hai"),
+    "Unknown number": ("9000000000", "Mera order kahan hai?"),
+}
+if page == "Support":
+    st.title("Support copilot")
+    st.caption("Drafts a reply from the customer's order and the approved catalogue entry. "
+               "An agent always reviews it; nothing is sent automatically.")
+    pick = st.selectbox("Sample tickets", ["(custom)"] + list(CX_SAMPLES))
+    d_phone, d_msg = CX_SAMPLES.get(pick, ("", ""))
+    phone = st.text_input("Customer phone (as received)", d_phone, key=f"cxp_{pick}")
+    message = st.text_area("Customer message", d_msg, height=100, key=f"cxm_{pick}")
+
+    def _draft():
+        with st.spinner("Looking up the order and drafting..."):
+            st.session_state["cx_res"] = run_copilot(phone, message, get_cx_chains())
+            st.session_state["cx_phone"] = phone
+
+    if st.button("Draft reply", type="primary", disabled=not (phone.strip() and message.strip())):
+        guarded(_draft)
+
+    res = st.session_state.get("cx_res")
+    if res:
+        left, right = st.columns(2)
+        with left:
+            st.subheader("What the copilot found")
+            st.write(f"**Customer:** {res.customer_name or 'not identified'}")
+            conf = f"{res.confidence:.2f}" if res.confidence is not None else "-"
+            st.write(f"**Intent:** {res.category or '-'} (confidence {conf})")
+            st.write(f"**Order:** {res.order_id or 'not specified'}")
+            st.code(res.facts or "no facts retrieved", language="text")
+        with right:
+            st.subheader("Draft reply")
+            if res.needs_human:
+                st.warning(f"Needs human review: {res.human_reason}")
+            if res.issues:
+                st.caption("Checks flagged: " + "; ".join(res.issues))
+            final = st.text_area("Edit before sending", res.reply_text, height=200, key=f"cxd_{res.run_id}")
+            if st.button("Approve & log", disabled=not final.strip() or not res.customer_id):
+                guarded(lambda: cx_store.log_reply(
+                    db.get_client(), customer_id=res.customer_id, phone=st.session_state["cx_phone"],
+                    category=res.category or "", draft=res.reply_text, final=final,
+                    needs_human=res.needs_human, reason=res.human_reason))
+                st.toast("Logged. Sending through Freshdesk is not wired up yet.")
+    st.stop()
 
 # ---------------------------------------------------------------- services page
 if page == "Services":
@@ -145,7 +199,8 @@ UTF-8 only. Blank rows are skipped. The row limit is set by `MAX_UPLOAD_ROWS`.
 
 ### Settings (secrets / environment variables)
 `OPENROUTER_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` (secret key), `LLM_MODEL`,
-`LLM_BASE_URL`, `LLM_TEMPERATURE`, `BATCH_MAX_CONCURRENCY`, `MAX_UPLOAD_ROWS`, `SAMPLE_CSV_PATH`.
+`LLM_BASE_URL`, `LLM_TEMPERATURE`, `BATCH_MAX_CONCURRENCY`, `MAX_UPLOAD_ROWS`, `SAMPLE_CSV_PATH`,
+`CX_CLASSIFIER_MODEL`, `CX_DRAFT_MODEL`, `CX_EVAL_MODEL` (support copilot; default to `LLM_MODEL`).
         """
     )
     st.subheader("Listing fields")
